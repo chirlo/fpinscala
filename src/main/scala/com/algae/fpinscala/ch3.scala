@@ -157,9 +157,6 @@ object ch3 {
     def maximumViaFold(t: Tree[Int]): Int =
       fold(t)(Int.MinValue)(_ max _)
       
-    def depthViaFold[A](t:Tree[A]): Int =
-      fold(t)(0)((a,d) => 1 + a.max(d))
-      
 
   }
 

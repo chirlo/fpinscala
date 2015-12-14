@@ -56,6 +56,10 @@ object ch6 {
         (j :: l, r2)
     }
   }
+  
+  
+  val bool = (x:RNG) => {val y =  map(nonNegativeInt)(_ % 2 ==0)(x); y.swap}
+  
 
   type Rand[+A] = RNG => (A, RNG)
 

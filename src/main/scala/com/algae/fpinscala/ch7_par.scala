@@ -1,15 +1,13 @@
 package com.algae.fpinscala
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Callable
+import java.util.concurrent.Future
 
 object ch7_par {
 
-  trait ExecutorService {
-    def submit[A](a: Callable[A]): Future[A]
-  }
-
-  trait Callable[A] { def call: A }
-  trait Future[A] {
+  /*trait Future[A] {
 
     def get: A
     def get(timeout: Long, unit: TimeUnit): A
@@ -17,55 +15,56 @@ object ch7_par {
     def isDone: Boolean
     def isCancelled: Boolean
   }
-
+*/
   //not a container, but a description of a computation
   type Par[A] = ExecutorService => Future[A]
 
   object Par {
 
-    private case class UnitFuture[A](get: A) extends Future[A] {
+    case class UnitFuture[A](g: A) extends Future[A] {
+      def get = g
       def isDone = true
       def get(timeout: Long, units: TimeUnit) = get
       def isCancelled = false
       def cancel(evenIfRunning: Boolean): Boolean = false
     }
 
-    val sameThreadExecutor = new ExecutorService {
-      override def submit[A](c: Callable[A]): Future[A] = UnitFuture(c.call)
-    }
-
-    def unit[A](a: A): Par[A] = (es: ExecutorService) => UnitFuture(a)
+    def unit[A](a: A): Par[A] = _ => UnitFuture(a)
 
     def lazyUnit[A](a: => A): Par[A] = fork(unit(a))
 
     //will take care of starting execution, 'interprets' the computation
     //This is where purity ends!
-    def run[A](s: ExecutorService)(a: Par[A]): A = ???
+    def run[A](s: ExecutorService)(a: Par[A]): A = a(s).get
 
     //7.1
-    def map2[A, B, C](pa: => Par[A], pb: => Par[B])(f: (A, B) => C): Par[C] = es =>
-      {
+    def map2[A, B, C](pa: Par[A], pb: Par[B])(f: (A, B) => C): Par[C] = es => {
+      println(s"$pa <> $pb")
 
-        val af = pa(es)
+      /*val af = pa(es)
+        println(Thread.currentThread.getId() + " af : " + af + " -" + af.get)
         val bf = pb(es)
+        println(Thread.currentThread().getId() + " bf : " + bf + " -" + bf.get)
 
         //7.3 respect time_outs
-        new UnitFuture[C](f(af.get, bf.get)) {
-          override def get(timeout: Long, units: TimeUnit) = {
+        new UnitFuture[C](f(af.get, bf.get))
+*/
+      Map2(pa, pb, f)(es)
+    }
 
-            def nano[A](a: => A) = {
-              val t0 = System.nanoTime()
-              val res = a
-              val delta = System.nanoTime() - t0
-              (a, delta)
-            }
+    case class Map2[A, B, C](pa: Par[A], pb: Par[B], f: (A, B) => C) extends Par[C] {
 
-            val (a, ta) = nano(af.get(timeout, units))
-            val remaining = units.convert(ta, TimeUnit.NANOSECONDS)
-            f(a, bf.get(remaining, units))
-          }
-        }
-      }
+
+      override def apply(es: ExecutorService): Future[C] = lift(f)(pa, pb)(es)
+      override def toString = s"Map2($pa,$pb)"
+
+    }
+
+    def lift[A, B, C](f: (A, B) => C): (Par[A], Par[B]) => Par[C] = (pa, pb) => es => {
+      val af = pa(es)
+      val bf = pb(es)
+      UnitFuture(f(af.get, bf.get))
+    }
 
     def map[A, B](pa: Par[A])(f: A => B): Par[B] =
       map2(pa, unit(()))((a, _) => f(a))
@@ -74,14 +73,21 @@ object ch7_par {
     //could be like async, hmmm...
     def fork[A](a: => Par[A]): Par[A] =
       es => es.submit(new Callable[A] {
-        def call = a(es).get
+
+        def call = {
+          val fa = a
+          //println(Thread.currentThread().getId() + " forced a")
+
+          fa(es).get
+
+        }
       })
 
     //7.4
     def asyncF[A, B](f: A => B): A => Par[B] = a => lazyUnit(f(a))
 
     def sequence[A](ps: List[Par[A]]): Par[List[A]] =
-      ps.foldRight(unit(List[A]()))(map2(_, _)(_ :: _))
+      ps.foldRight(unit(List[A]()))(map2(_, _)((x, y) => { println(s"Th-${Thread.currentThread().getId()} - join($x,$y)"); x :: y }))
 
     def parMap[A, B](ps: List[A])(f: A => B): Par[List[B]] = fork {
       //this fork makes it return immediately ( the fold could take a long time for a big list)
@@ -122,8 +128,8 @@ object ch7_par {
     }
 
     //7.14
-    def join[A](ppa: Par[Par[A]]): Par[A] = es =>
-      ppa(es).get(es)
+    //def join[A](ppa: Par[Par[A]]): Par[A] = es =>
+    //ppa(es).get(es)
 
   }
 }
